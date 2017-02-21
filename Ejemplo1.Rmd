@@ -28,9 +28,21 @@ Por ejemplo, podríamos utilizar, como modelos de primer nivel, un *random  fore
 
 Caben todo tipo de aproximaciones: podría haber muchos más modelos en el primer nivel, incluso del mismo tipo pero con diferentes parámetros. Y el modelo de segundo nivel podría ser tan sencillo como una **media**, una **media ponderada** o un **recuento** tipo "votación en la que la mayoría gana" de las predicciones de los modelos de primer nivel. Si el *ensemble* utiliza como modelo de segundo nivel uno complejo, basado en un algoritmo de aprendizaje máquina como *random forest*, *redes neuronales*, *support vector machines*, etc., entonces se denomina **stack** ("pila") de modelos, y la técnica asociada se denomina **stacking**.
 
+Entre los *ensembles* hay que destacar también dos técnicas avanzadas, el *bagging* y el *boosting*. Más adelante, en otros posts, hablaremos de ellas.
+
 Los *ensembles* suelen mejorar el rendimiento de los modelos de primer nivel, sobre todo si el de estos últimos no es espectacular. 
 
 Como ejemplo, vamos a construir algunos ensembles para el mismo problema de los posts *Arboles de Decisión*. [I](http://es100x100datascience.com/arboles-de-decision-i/), [II](http://es100x100datascience.com/arboles-de-decision-ii/), [III](http://es100x100datascience.com/arboles-de-decision-iii/) y [IV](http://es100x100datascience.com/arboles-de-decision-iv/)
+
+## Modelos de 2º nivel: media, media ponderada y votación
+
+Empezaremos, ya que lo hemos mencionado antes, entrenando un `random forest`, un `svm` tipo *radial* y un `xgbm` tipo "tree* como modelos de primer nivel.
+
+Para construirlos vamos a aprovechar las facilidades del paquete [`caret`](https://cran.r-project.org/web/packages/caret/index.html). Por ejemplo, nos permitirá validar los modelos construidos mediante *cross validation*, es decir, usando solo el *train set* sin necesidad de disponer de un *data set* específico para validación.
+
+Como modelos de 2º nivel vamos a probar con una media, una media ponderada y una votación.
+
+Como estos modelos de segundo nivel no los construiremos con `caret`, necesitaremos un *data set* específico para validarlos.
 
 En primer lugar, vamos a cargar los datos:
 
@@ -39,9 +51,11 @@ library(C50)
 data(churn)
 ```
 
-No vamos a repetir aquí la exploración que ya hemos hecho en los posts referidos, sino que vamos a ir directamente a la construcción del *ensemble*. Para construir los modelos vamos a utilizar el paquete [`caret`](https://cran.r-project.org/web/packages/caret/index.html).
+Hemos cargado un *train set* (`churnTrain`) y un *test set* (`churnTest`). El primero lo usaremos para construir y validar los modelos y el segundo será la "prueba de fuego", es decir, datos que no habremos visto nunca durante la construcción de los modelos y que utilizaremos como datos en condiciones reales.
 
-Preparemos los datos y dividámoslos en un *train set* y un *validation set*:
+No vamos a repetir aquí la exploración de los datos que ya hemos hecho en los posts referidos, sino que vamos a ir directamente a la construcción del *ensemble*. 
+
+Preparemos los datos y dividamos `churnTrain` en un *train set* y un *validation set*:
 ```{r}
 churn <- rbind(churnTrain, churnTest)
 
@@ -58,11 +72,16 @@ for (v in predictoras) {
   }
 }
 
+churnTrain <- churn[1:nrow(churnTrain), ]
+churnTest  <- churn[(nrow(churnTrain) + 1):nrow(churn), ]
+
+rm(churn)
+
 library(caret)
 set.seed(123)
-train_idx   <- createDataPartition(churn$churn, p = 0.75, list = FALSE)
-churn_train <- churn[ train_idx,]
-churn_valid <- churn[-train_idx,]
+train_idx   <- createDataPartition(churnTrain$churn, p = 0.75, list = FALSE)
+churn_train <- churnTrain[ train_idx,]
+churn_valid <- churnTrain[-train_idx,]
 ```
 
 Preparemos ahora los controles que vamos a utilizar al construir nuestros modelos:
@@ -80,7 +99,8 @@ trControl <- trainControl(
                          ) 
 ```
 
-Ya que lo hemos mencionado antes, vamos a entrenar un `random forest`, un `svm` tipo *radial* y un `xgbm` tipo "tree* como modelos de primer nivel.
+Construimos nuestros tres modelos de primer nivel:
+
 ```{r}
 model_rf   <- train(churn_train[ , predictoras], churn_train[ , target],
                     method     = "rf",
@@ -96,7 +116,7 @@ model_xgbm <- train(churn_train[ , predictoras], churn_train[ , target],
                     tuneLength = 3)
 ```
 
-Veamos la performance de los 3 modelos y comparemos (nótese que las medidas de rendimiento se toman mediante *Cross validation* sobre el *training set*):
+Veamos la *performance* de cada uno de los 3 modelos y comparemos (nótese que las medidas de rendimiento se toman mediante *cross validation* sobre el *training set*, no necesitamos acudir al *validation set*):
 
 ```{r}
 resamps <- resamples(list(rf = model_rf, svm = model_svm, xgbm = model_xgbm))
@@ -105,19 +125,26 @@ summary(resamps)
 bwplot(resamps)
 ```
 
-Los tres modelos presentan una elevada *accuracy*, aunque la *kappa* del svm es notablemente menor que la de los otros dos.
+```{r include = FALSE}
+best_acc_rf   <- summary(resamps$values$`rf~Accuracy`)["Mean"]
+best_acc_svm  <- summary(resamps$values$`svm~Accuracy`)["Mean"]
+best_acc_xgbm <- summary(resamps$values$`xgbm~Accuracy`)["Mean"]
+                      
+```
+
+Los tres modelos presentan una elevada *accuracy* (rf = `r best_acc_rf`, svm = `r best_acc_svm`, xgbm = `r best_acc_xgbm`), aunque la *kappa* del svm es notablemente menor que la de los otros dos.
 
 ```{r}
 diffs <- diff(resamps)
 summary(diffs)
 ```
-Además xgbm y rf dan resultados muy correlados.
+Además xgbm y rf dan resultados completamente correlados.
 
-A partir de esto podríamos quedarnos con svm y elegir entre xgbm y rf para a continuación tratar de añadir más modelos poco correlados con los dos elegidos.
+A partir de esto podríamos quedarnos con svm y elegir entre xgbm y rf para, a continuación, tratar de añadir más modelos poco correlados con los dos elegidos.
 
 Sin embargo, vamos a darnos por satisfechos con los tres modelos para continuar con el ejemplo y construir algunos modelos de nivel 2.
 
-Lo primero que necesito son las nuevas variables predictoras, esta vez de segundo nivel:
+Lo primero que necesito son las nuevas variables predictoras, esta vez de segundo nivel. Nótese que a partir de ahora tenemos que utilizar el *validation set* para validar los modelos de segundo nivel.
 
 ```{r}
 # Utilizamos los modelos de 1er nivel para predecir 
@@ -195,9 +222,210 @@ confusionMatrix(churn_valid$churn, churn_valid$pred_weighted_avg)
 ```
 
 ```{r}
-## ## VOTACIÓN
+## VOTACIÓN
 confusionMatrix(churn_valid$churn, churn_valid$pred_majority)
 ```
 
 
-Como se ve, los 3 modelos de segundo nivel dan resultados ligeramente mejores que los de primer nivel.
+Como se ve, los modelos de segundo nivel media y votación dan resultados ligeramente mejores que los de primer nivel. Podríamos elegir cualquiera de los dos. 
+
+Supongamos que elegimos el modelo de votación. ¿Qué nos quedaría por hacer ahora? Pues construir el modelo final. Para ello, construiriamos los modelos definitivos de primer nivel utilizando esta vez **todos** los datos de entrenamiento (es decir, `churnTrain` completo) y los parámetros que optimizados por `caret`.
+
+```{r}
+# Parámetros a utilizar
+model_rf$bestTune
+model_svm$bestTune
+model_xgbm$bestTune
+```
+
+```{r}
+trControl <- trainControl(
+                          method = "none", 
+                          # Class probabilities will be computed along with
+                          # predicted values in each resample
+                          classProbs = TRUE
+                         ) 
+
+best_model_rf   <- train(churnTrain[ , predictoras], churnTrain[ , target],
+                         method     = "rf",
+                         trControl  = trControl,
+                         tuneGrid   = model_rf$bestTune)
+best_model_svm  <- train(churnTrain[ , predictoras], churnTrain[ , target],
+                         method     = "svmRadial",
+                         trControl  = trControl,
+                         tuneGrid   = model_svm$bestTune)
+best_model_xgbm <- train(churnTrain[ , predictoras], churnTrain[ , target],
+                         method     = "xgbTree",
+                         trControl  = trControl,
+                         tuneGrid   = model_xgbm$bestTune)
+```
+
+Y ahora predeciriamos el *test set* con nuestro modelo de votación:
+```{r}
+churn_test <- churnTest
+
+# Utilizamos los modelos de 1er nivel para predecir 
+churn_test$pred_rf   <- predict(object = model_rf, 
+                                churn_test[ , predictoras])
+churn_test$pred_svm  <- predict(object = model_svm, 
+                                churn_test[ , predictoras])
+churn_test$pred_xgbm <- predict(object = model_xgbm,
+                                churn_test[ , predictoras])
+
+# Y sus probabilidades
+churn_test$pred_rf_prob   <- predict(object = model_rf,
+                                     churn_test[,predictoras],
+                                     type='prob')
+churn_test$pred_svm_prob  <- predict(object = model_svm,
+                                     churn_test[,predictoras],
+                                     type='prob')
+churn_test$pred_xgbm_prob <- predict(object = model_xgbm,
+                                     churn_test[,predictoras],
+                                     type='prob')
+
+
+churn_test$pred_majority <- 
+  as.factor(apply(churn_test[, predictoras2N],
+                  1, 
+                  function(x) {
+                    if (sum(x == "yes") > sum(x == "no"))
+                      return("yes")
+                    else
+                      return("no")
+                    }))
+```
+
+Y estos son los resultados:
+
+```{r}
+## VOTACIÓN
+confusionMatrix(churn_test$churn, churn_test$pred_majority)
+```
+
+Realmente son unos muy buenos resultados. Hasta ahora no habíamos visto estos datos de `churnTest` para nada, es la primera vez que nuestros modelos se enfrentan a ellos. Y han obtenido una *performance* comparable a la obtenida en el proceso de entrenamiento, cuando normalmente se obtiene inferior *performance* con los datos "nuevos" del *test set* que con los del *train set*, como es lógico.
+
+## Modelos de segundo nivel: red neuronal, random forest, extreme gradient boosting y support vector machine
+Vamos a seleccionar ahora un modelo de segundo nivel un poco más complejo entre varios posibles: una red neuronal, un random forest, un extreme gradient boosting y un support vector machine.
+
+Ahora puedo utilizar `caret` para construir tanto los modelos de primer nivel como los de segundo. Por tanto, puedo validarlos mediante la técnica *cross validation* que puedo utilizar a partir del *train set*, sin necesidad de utiliizar un *validation set* aparte para ello.
+
+Construyamos los modelos de primer nivel:
+```{r}
+churn_train <- churnTrain
+churn_test  <- churnTest
+
+trControl <- trainControl(
+                          # 5-fold Cross Validation
+                          method = "cv", 
+                          number = 5,
+                          # Save the predictions for the optimal tuning 
+                          # parameters
+                          savePredictions = 'final', 
+                          # Class probabilities will be computed along with
+                          # predicted values in each resample
+                          classProbs = TRUE
+                         ) 
+
+model_rf   <- train(churn_train[ , predictoras], churn_train[ , target],
+                    method     = "rf",
+                    trControl  = trControl,
+                    tuneLength = 3)
+model_svm  <- train(churn_train[ , predictoras], churn_train[ , target],
+                    method     = "svmRadial",
+                    trControl  = trControl,
+                    tuneLength = 3)
+model_xgbm <- train(churn_train[ , predictoras], churn_train[ , target],
+                    method     = "xgbTree",
+                    trControl  = trControl,
+                    tuneLength = 3)
+```
+
+Ahora compararíamos la *performance* y la correlación de los modelos de primer nivel como hemos hecho antes, por eso no vamos a repetirlo.
+
+Pasamos, pues, directamente, a construir los modelos de segundo nivel, en este caso a partir del *train_set*:
+```{r}
+# Utilizamos los modelos de 1er nivel para predecir las probabilidades 
+# Out-Of-Fold del training set
+churn_train$OOF_pred_rf <- 
+  model_rf$pred$yes[order(model_rf$pred$rowIndex)]
+churn_train$OOF_pred_svm <- 
+  model_svm$pred$yes[order(model_svm$pred$rowIndex)]
+churn_train$OOF_pred_xgbm <-
+  model_xgbm$pred$yes[order(model_xgbm$pred$rowIndex)]
+
+```
+
+Hay que hacer notar que siempre debemos emplear en esta fase las predicciones *out of bag* o *out of fold*; de otra manera la importancia de los modelos de primer nivel sería tan solo función de lo bien que cada modelo de primer nivel es capaz de "recordar" los datos de entrenamiento.
+
+Ahora ya podemos entrenar los modelos de segundo nivel:
+```{r}
+# Predictoras de los modelos de primer nivel para el segundo nivel
+predictoras2N <- c('OOF_pred_rf','OOF_pred_svm','OOF_pred_xgbm') 
+
+trControl <- trainControl(
+                          # 5-fold Cross Validation
+                          method = "cv", 
+                          number = 5,
+                          # Class probabilities will be computed along with
+                          # predicted values in each resample
+                          classProbs = TRUE
+                         ) 
+
+model_2nn   <- train(churn_train[ , predictoras2N], churn_train[ , target],
+                     method     = "nnet",
+                     # Neural nets like scaled and normalized inputs
+                     preProcess = c("center", "scale"),
+                     trace      = FALSE,
+                     trControl  = trControl,
+                     tuneLength = 3)
+model_2rf   <- train(churn_train[ , predictoras2N], churn_train[ , target],
+                     method     = "rf",
+                     trControl  = trControl,
+                     tuneLength = 3)
+model_2svm  <- train(churn_train[ , predictoras2N], churn_train[ , target],
+                     method     = "svmRadial",
+                     trControl  = trControl,
+                     tuneLength = 3)
+model_2xgbm <- train(churn_train[ , predictoras2N], churn_train[ , target],
+                     method     = "xgbTree",
+                     trControl  = trControl,
+                     tuneLength = 3)
+```
+
+Y compararlos:
+```{r}
+resamps <- resamples(list(nnet = model_2nn, rf = model_2rf, 
+                          svm = model_2svm, xgbm = model_2xgbm))
+summary(resamps)
+```
+
+```{r}
+bwplot(resamps)
+```
+
+```{r}
+diffs <- diff(resamps)
+summary(diffs)
+```
+
+`xgbm` y random forest son virtualmente indistinguibles.
+
+Como `xgbm` es ligeramente superior en *accuracy* y en *Kappa* a `nnet`, nos quedaremos con `xgbm` como modelo final.
+
+Solo nos queda ya comprobar el resultado con el *test set*:
+
+```{r}
+churn_test$OOF_pred_rf   <- predict(model_rf, churn_test[, predictoras],
+                                    type = "prob")$yes
+churn_test$OOF_pred_svm  <- predict(model_svm, churn_test[, predictoras],
+                                    type = "prob")$yes
+churn_test$OOF_pred_xgbm <- predict(model_xgbm, churn_test[, predictoras],
+                                    type = "prob")$yes
+
+churn_test$pred_nn <- predict(model_2xgbm, churn_test[, predictoras2N])
+```
+
+```{r}
+confusionMatrix(churn_test$churn, churn_test$pred_nn)
+```
+
