@@ -61,7 +61,7 @@ outcomeName <- 'Loan_Status'
 ```{r}
 # Training the random forest model
 model_rf <- train(trainSet[,predictors], trainSet[,outcomeName],
-                  method  ='rf',
+                  method  = 'rf',
                   trControl = fitControl,
                   tuneLength = 3)
 
@@ -74,10 +74,13 @@ confusionMatrix(testSet$Loan_Status,testSet$pred_rf)
 
 ```{r}
 # Training the knn model
-model_knn<-train(trainSet[,predictors],trainSet[,outcomeName],method='knn',trControl=fitControl,tuneLength=3)
+model_knn <- train(trainSet[,predictors], trainSet[,outcomeName],
+                   method = 'knn',
+                   trControl = fitControl, 
+                   tuneLength = 3)
 
 # Predicting using knn model
-testSet$pred_knn<-predict(object = model_knn,testSet[,predictors])
+testSet$pred_knn <- predict(object = model_knn,testSet[,predictors])
 
 # Checking the accuracy of the random forest model
 confusionMatrix(testSet$Loan_Status,testSet$pred_knn)
@@ -85,44 +88,75 @@ confusionMatrix(testSet$Loan_Status,testSet$pred_knn)
 
 ```{r}
 # Training the Logistic regression model
-model_lr<-train(trainSet[,predictors],trainSet[,outcomeName],method='glm',trControl=fitControl,tuneLength=3)
+model_lr <- train(trainSet[,predictors], trainSet[,outcomeName],
+                  method = 'glm',
+                  trControl = fitControl,
+                  tuneLength = 3)
 
 # Predicting using knn model
-testSet$pred_lr<-predict(object = model_lr,testSet[,predictors])
+testSet$pred_lr <- predict(object = model_lr,testSet[,predictors])
 
 # Checking the accuracy of the random forest model
 confusionMatrix(testSet$Loan_Status,testSet$pred_lr)
 ```
 
 ```{r}
+resamps <- resamples(list(rf = model_rf, knn = model_knn, lr = model_lr))
+summary(resamps)
+
+xyplot(resamps, what = "BlandAltman")
+dotplot(resamps)
+densityplot(resamps)
+bwplot(resamps)
+splom(resamps)
+parallelplot(resamps)
+
+diffs <- diff(resamps)
+summary(diffs)
+```
+
+
+```{r}
 ## AVERAGING
 # Predicting the probabilities
-testSet$pred_rf_prob<-predict(object = model_rf,testSet[,predictors],type='prob')
-testSet$pred_knn_prob<-predict(object = model_knn,testSet[,predictors],type='prob')
-testSet$pred_lr_prob<-predict(object = model_lr,testSet[,predictors],type='prob')
+testSet$pred_rf_prob <- predict(object = model_rf,
+                                testSet[,predictors],
+                                type='prob')
+testSet$pred_knn_prob <- predict(object = model_knn,
+                                 testSet[,predictors],
+                                 type='prob')
+testSet$pred_lr_prob <- predict(object = model_lr,
+                                testSet[,predictors],
+                                type='prob')
 
 # Taking average of predictions
-testSet$pred_avg<-(testSet$pred_rf_prob$Y+testSet$pred_knn_prob$Y+testSet$pred_lr_prob$Y)/3
+testSet$pred_avg <- (testSet$pred_rf_prob$Y + testSet$pred_knn_prob$Y + testSet$pred_lr_prob$Y) / 3
 
 # Splitting into binary classes at 0.5
-testSet$pred_avg<-as.factor(ifelse(testSet$pred_avg>0.5,'Y','N'))
+testSet$pred_avg <- as.factor(ifelse(testSet$pred_avg>0.5, 'Y', 'N'))
 ```
 
 
 ```{r}
 ## MAJORITY VOTING
 # The majority vote
-testSet$pred_majority<-as.factor(ifelse(testSet$pred_rf=='Y' & testSet$pred_knn=='Y','Y',ifelse(testSet$pred_rf=='Y' & testSet$pred_lr=='Y','Y',ifelse(testSet$pred_knn=='Y' & testSet$pred_lr=='Y','Y','N'))))
+testSet$pred_majority <- as.factor(ifelse(testSet$pred_rf == 'Y' &
+                                            testSet$pred_knn == 'Y','Y', 
+              ifelse(testSet$pred_rf == 'Y' &
+                       testSet$pred_lr == 'Y','Y', 
+                     ifelse(testSet$pred_knn == 'Y' &
+                              testSet$pred_lr == 'Y','Y','N'))))
 ```
 
 
 ```{r}
 ## WEIGHTED AVERAGE
 # Taking weighted average of predictions
-testSet$pred_weighted_avg<-(testSet$pred_rf_prob$Y*0.25)+(testSet$pred_knn_prob$Y*0.25)+(testSet$pred_lr_prob$Y*0.5)
+testSet$pred_weighted_avg <- (testSet$pred_rf_prob$Y * 0.25) + (testSet$pred_knn_prob$Y * 0.25) + (testSet$pred_lr_prob$Y * 0.5)
 
 # Splitting into binary classes at 0.5
-testSet$pred_weighted_avg<-as.factor(ifelse(testSet$pred_weighted_avg>0.5,'Y','N'))
+testSet$pred_weighted_avg <- as.factor(ifelse(testSet$pred_weighted_avg > 0.5, 
+                                              'Y', 'N'))
 ```
 
 ```{r}
